@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Combination Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #wordList, #combinationArea, #result, #meaning, #score {
+            margin-bottom: 20px;
+        }
+        .word {
+            display: inline-block;
+            padding: 10px;
+            margin: 5px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            cursor: move;
+        }
+        #combinationArea {
+            min-height: 100px;
+            border: 2px dashed #aaa;
+            padding: 10px;
+        }
+        button, select {
+            padding: 10px;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Word Combination Game</h1>
+    <div>
+        <label for="categorySelect">Choose a category: </label>
+        <select id="categorySelect">
+            <option value="">--Select a category--</option>
+        </select>
+    </div>
+    <div id="score">Score: 0</div>
+    <div id="wordList"></div>
+    <div id="combinationArea" ondrop="drop(event)" ondragover="allowDrop(event)">
+        Drag words here to combine
+    </div>
+    <button onclick="createNewWord()">Create New Word</button>
+    <div id="result"></div>
+    <div id="meaning"></div>
+
+    <script>
+        const categories = {
+            "Food": ["apple", "bread", "cheese", "pizza", "salad"],
+            "Animals": ["dog", "cat", "bird", "fish", "lion"],
+            "Colors": ["red", "blue", "green", "yellow", "purple"],
+            "Clothing": ["shirt", "pants", "dress", "hat", "shoes"],
+            "Nature": ["tree", "river", "mountain", "flower", "cloud"]
+        };
+
+        let wordSet = new Set();
+        let combinedWords = [];
+        let score = 0;
+        let createdWords = new Set(); // To keep track of words already created
+
+        function initializeGame() {
+            const categorySelect = document.getElementById("categorySelect");
+            for (let category in categories) {
+                const option = document.createElement("option");
+                option.value = category;
+                option.textContent = category;
+                categorySelect.appendChild(option);
+            }
+            categorySelect.addEventListener("change", updateCategory);
+        }
+
+        function updateCategory() {
+            const category = document.getElementById("categorySelect").value;
+            wordSet = new Set(categories[category]);
+            updateWordList();
+            document.getElementById("combinationArea").innerHTML = "Drag words here to combine";
+            document.getElementById("result").textContent = "";
+            document.getElementById("meaning").textContent = "";
+        }
+
+        function updateWordList() {
+            const wordListElement = document.getElementById("wordList");
+            wordListElement.innerHTML = "";
+            wordSet.forEach(word => {
+                const wordElement = document.createElement("div");
+                wordElement.className = "word";
+                wordElement.draggable = true;
+                wordElement.ondragstart = drag;
+                wordElement.textContent = word;
+                wordListElement.appendChild(wordElement);
+            });
+        }
+
+        function allowDrop(ev) {
+            ev.preventDefault();
+        }
+
+        function drag(ev) {
+            ev.dataTransfer.setData("text", ev.target.textContent);
+        }
+
+        function drop(ev) {
+            ev.preventDefault();
+            const word = ev.dataTransfer.getData("text");
+            if (!combinedWords.includes(word)) {
+                combinedWords.push(word);
+                const wordElement = document.createElement("div");
+                wordElement.className = "word";
+                wordElement.textContent = word;
+                ev.target.appendChild(wordElement);
+            }
+        }
+
+        async function createNewWord() {
+            if (combinedWords.length < 2) {
+                document.getElementById("result").textContent = "Please drag at least two words to combine.";
+                return;
+            }
+
+            const newWord = combinedWords.join(" ");
+            const relatedWords = await findRelatedWords(newWord);
+            
+            if (relatedWords.length > 0) {
+                const validNewWord = relatedWords[0].word;
+                const wordFrequency = relatedWords[0].score || 1;
+                
+                if (!createdWords.has(validNewWord)) {
+                    const pointsEarned = calculatePoints(wordFrequency);
+                    score += pointsEarned;
+                    createdWords.add(validNewWord);
+                    
+                    const category = document.getElementById("categorySelect").value;
+                    categories[category].push(validNewWord);
+                    wordSet.add(validNewWord);
+                    updateWordList();
+                    
+                    document.getElementById("score").textContent = `Score: ${score}`;
+                    document.getElementById("result").textContent = `New word/phrase '${validNewWord}' created! You earned ${pointsEarned} points!`;
+                } else {
+                    document.getElementById("result").textContent = `'${validNewWord}' has already been created. No points earned.`;
+                }
+                
+                // Fetch and display the meaning
+                const meaning = await getWordMeaning(validNewWord);
+                document.getElementById("meaning").innerHTML = `<strong>Meaning:</strong> ${meaning}`;
+            } else {
+                document.getElementById("result").textContent = "Sorry, couldn't find a related word or phrase. Try a different combination.";
+                document.getElementById("meaning").textContent = "";
+            }
+
+            // Reset combination area
+            document.getElementById("combinationArea").innerHTML = "Drag words here to combine";
+            combinedWords = [];
+        }
+
+        async function findRelatedWords(word) {
+            try {
+                const response = await fetch(`https://api.datamuse.com/words?ml=${word}&max=5&md=f`);
+                const data = await response.json();
+                return data.map(item => ({word: item.word, score: parseFloat(item.tags.find(tag => tag.startsWith('f:')).slice(2))}));
+            } catch (error) {
+                console.error("Error fetching related words:", error);
+                return [];
+            }
+        }
+
+        function calculatePoints(frequency) {
+            // The rarer the word, the higher the score
+            // Frequency is per million words, so we invert it and scale it
+            return Math.round(1000 / (frequency + 1));
+        }
+
+        async function getWordMeaning(word) {
+            try {
+                const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+                const data = await response.json();
+                if (data.length > 0 && data[0].meanings.length > 0) {
+                    return data[0].meanings[0].definitions[0].definition;
+                } else {
+                    return "No definition found.";
+                }
+            } catch (error) {
+                console.error("Error fetching word meaning:", error);
+                return "Unable to fetch definition.";
+            }
+        }
+
+        initializeGame();
+    </script>
+</body>
+</html>
